@@ -9,55 +9,128 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      # 1. 拉取代码和 LFS 模型文件
-      - name: Checkout repository (with LFS)
+      - name: Checkout (with LFS)
         uses: actions/checkout@v4
         with:
           lfs: true
           fetch-depth: 0
 
-      # 2. 确认模型文件是否存在
-      - name: List models
-        run: dir models
+      - name: Print repo tree & find spec
+        shell: pwsh
+        run: |
+          Write-Host "=== repo files (top-level) ==="
+          Get-ChildItem -Force | Select-Object Name,Length,Mode
+          Write-Host "`n=== find *.spec ==="
+          $specs = Get-ChildItem -Recurse -Filter *.spec | Select-Object -ExpandProperty FullName
+          if ($specs) { $specs | ForEach-Object { Write-Host "FOUND SPEC: $_" } } else { Write-Warning "No .spec found" }
+          # 保存第一个 spec 路径到文件(后面读取)
+          if ($specs) { $specs | Select-Object -First 1 | Out-File -Encoding ascii build_spec_path.txt }
 
-      # 3. 设置 Python 环境
+      - name: List models (sanity)
+        shell: pwsh
+        run: |
+          if (Test-Path models) {
+            Write-Host "=== models/ ==="
+            Get-ChildItem -Recurse models | Select-Object FullName,Length
+          } else {
+            Write-Warning "models/ NOT found (will still try to build)"
+          }
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      # 4. 安装依赖
-      - name: Install dependencies
+      - name: Install dependencies (robust)
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip wheel
-          pip install -r requirements.txt
+          if (Test-Path requirements.txt) {
+            Write-Host "Installing from requirements.txt"
+            pip install -r requirements.txt
+          } elseif (Test-Path requirements-dev.txt) {
+            Write-Host "Installing from requirements-dev.txt"
+            pip install -r requirements-dev.txt
+          } else {
+            Write-Warning "requirements*.txt not found, installing common deps"
+          }
+          # 兜底：常见依赖（按你项目实际可再精简/增补）
           pip install pyinstaller
+          pip install PyQt5 shapely numpy pillow onnxruntime opencv-python scikit-image pyqtgraph tqdm requests
 
-      # 5. 用 PyInstaller 打包 exe
-      - name: Build with PyInstaller
-        run: pyinstaller --noconfirm x-anylabeling-win-cpu.spec
-
-      # 6. 把 models 目录复制到 dist 目录
-      - name: Copy models into dist
+      - name: Build (prefer .spec; fallback to entry script)
+        shell: pwsh
         run: |
-          if exist models (
-            for /d %%i in (dist\*) do (
-              xcopy models "%%i\models" /E /I /Y
+          $spec = $(Get-Content build_spec_path.txt -ErrorAction SilentlyContinue)
+          if ($spec) {
+            Write-Host "Using spec: $spec"
+            pyinstaller --noconfirm "$spec"
+          } else {
+            Write-Warning "No .spec found, fallback to script build"
+            # 入口脚本兜底猜测：请按你仓库实际入口替换
+            $entryCandidates = @(
+              "x_anylabeling.py",
+              "x-anylabeling.py",
+              "anylabeling/app.py",
+              "main.py",
+              "run.py"
             )
-          )
+            $entry = $null
+            foreach ($c in $entryCandidates) {
+              if (Test-Path $c) { $entry = $c; break }
+            }
+            if (-not $entry) { throw "Cannot find entry script. Please put your entry (e.g. anylabeling/app.py) into the list." }
 
-      # 7. 压缩成 zip 文件
+            # 把 models 打进包（datas）
+            $datas = "models;models"
+            pyinstaller --noconfirm --name X-AnyLabeling `
+              --add-data "$datas" `
+              --clean "$entry"
+          }
+
+      - name: Ensure models copied into dist (double-safety)
+        shell: pwsh
+        run: |
+          if (Test-Path models) {
+            $appDir = Get-ChildItem dist -Directory | Select-Object -First 1
+            if ($null -eq $appDir) { throw "No app dir found under dist" }
+            $dst = Join-Path $appDir.FullName "models"
+            New-Item -ItemType Directory -Force -Path $dst | Out-Null
+            Copy-Item -Recurse -Force models\* $dst\
+            Write-Host "✅ Models copied to $dst"
+          } else {
+            Write-Warning "models/ not found; skip copy"
+          }
+
+      - name: Show dist content
+        shell: pwsh
+        run: |
+          Write-Host "=== dist tree ==="
+          Get-ChildItem -Recurse dist | Select-Object FullName,Length
+
       - name: Package zip
-        run: powershell Compress-Archive -Path dist\* -DestinationPath X-AnyLabeling-win.zip
+        shell: pwsh
+        run: |
+          if (Test-Path X-AnyLabeling-win.zip) { Remove-Item X-AnyLabeling-win.zip -Force }
+          Compress-Archive -Path dist\* -DestinationPath X-AnyLabeling-win.zip
+          Write-Host "Zip created: X-AnyLabeling-win.zip"
 
-      # 8. 上传到 GitHub Release
-      - name: Create Release
+      - name: Upload artifact (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: X-AnyLabeling-win
+          path: X-AnyLabeling-win.zip
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ github.run_number }}
           name: "Windows Build #${{ github.run_number }}"
-          body: "自动生成的 Windows 安装包，包含模型文件"
+          body: |
+            自动生成的 Windows 包（含模型）。
+            若运行异常，请检查 dist 目录结构及模型路径。
           files: X-AnyLabeling-win.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
