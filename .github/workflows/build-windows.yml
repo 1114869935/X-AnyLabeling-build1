@@ -34,7 +34,7 @@ jobs:
 
       - name: Build EXE with Your Spec File
         # 【核心修复】请将下面的 your-spec-file.spec 换成您在第二步中修改的那个文件名
-        run: pyinstaller --noconfirm your-spec-file.spec
+        run: pyinstaller --noconfirm x-anylabeling-win-cpu.spec
 
       - name: Copy Models Folder
         run: Copy-Item -Path models -Destination dist/X-AnyLabeling-Fixed -Recurse -Force
