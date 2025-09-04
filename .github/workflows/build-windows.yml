@@ -1,7 +1,7 @@
 # 文件路径: .github/workflows/build-windows-exe.yml
-# 【最终·有效Action版】 - 替换了失效的 VC++ 安装 Action
+# 【终极·手动安装版】 - 不再依赖任何第三方 Action，手动下载并安装 VC++ 运行库，确保 100% 可靠
 
-name: Build X-AnyLabeling for Windows (Final)
+name: Build X-AnyLabeling for Windows (Final & Reliable)
 
 on:
   workflow_dispatch:
@@ -25,9 +25,13 @@ jobs:
           python-version: '3.10'
           architecture: 'x64'
 
-      # 3. 【核心修复】使用一个有效的 Action 来安装 ONNX Runtime 所需的系统级依赖库
-      - name: Install Microsoft Visual C++ Redistributable
-        uses: hustcer/install-vcredist@v1
+      # 3. 【核心修复】手动下载并安装 Microsoft Visual C++ 运行库
+      - name: Manually Install Microsoft Visual C++ Redistributable
+        run: |
+          # 从微软官方稳定链接下载最新的 VC++ 运行库安装程序
+          Invoke-WebRequest -Uri https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile vc_redist.x64.exe
+          # 以静默模式运行安装程序，并等待其完成
+          Start-Process -FilePath .\vc_redist.x64.exe -ArgumentList '/install /passive /norestart' -Wait
 
       # 4. 安装所有 Python 依赖
       - name: Install Python dependencies
@@ -36,7 +40,7 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
           
-      # 5. 使用 PyInstaller 打包 (单行命令避免语法错误，--console 用于最后调试)
+      # 5. 使用 PyInstaller 打包
       - name: Run PyInstaller (Single-Line Command)
         run: >
           pyinstaller --noconfirm --onedir --clean --console --name "BacteriaLabelingTool" --icon "anylabeling/resources/images/icon.ico" --add-data "models;models" --add-data "anylabeling/configs/auto_labeling/bacteria_autoseg.yaml;anylabeling/configs/auto_labeling" --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" --add-data "anylabeling/configs;anylabeling/configs" --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" --add-data "anylabeling/services/auto_labeling/configs/bert;anylabeling/services/auto_labeling/configs/bert" --add-data "anylabeling/services/auto_labeling/configs/clip;anylabeling/services/auto_labeling/configs/clip" --add-data "anylabeling/services/auto_labeling/configs/ppocr;anylabeling/services/auto_labeling/configs/ppocr" --add-data "anylabeling/services/auto_labeling/configs/ram;anylabeling/services/auto_labeling/configs/ram" anylabeling/app.py
