@@ -1,11 +1,29 @@
 # 文件路径: anylabeling/services/auto_labeling/bacteria_autoseg.py
-# 【最终修正版 V5 - 增加多边形近似平滑】
+# 【修改后版本】
 
 import logging
 import traceback
 import numpy as np
 import cv2
 from PyQt5 import QtCore
+
+# ==================== 新增代码段 开始 ====================
+import sys
+import os
+
+def get_resource_path(relative_path):
+    """
+    获取资源的绝对路径，无论是开发环境还是打包后的EXE都能用。
+    """
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 会创建一个临时文件夹，并把路径存储在 _MEIPASS 中
+        base_path = sys._MEIPASS
+    else:
+        # 在正常的开发环境中，我们假设脚本是从项目根目录运行的
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
+# ==================== 新增代码段 结束 ====================
 
 from .model import Model
 from .bacteria_onnx import BacteriaONNX
@@ -29,21 +47,34 @@ class BacteriaAutoseg(Model):
 
     def __init__(self, config_path, on_message) -> None:
         super().__init__(config_path, on_message)
-        encoder_model_abs_path = self.get_model_abs_path(
-            self.config, "encoder_model_path"
-        )
-        decoder_model_abs_path = self.get_model_abs_path(
-            self.config, "decoder_model_path"
-        )
+        
+        # ==================== 修改代码段 开始 ====================
+        # 1. 从 self.config (由基类加载的配置文件) 中获取相对路径
+        encoder_rel_path = self.config.get("encoder_model_path")
+        decoder_rel_path = self.config.get("decoder_model_path")
+        input_size = self.config.get("input_size", 1024)  # 同时获取 input_size
 
-        if not encoder_model_abs_path:
-            raise FileNotFoundError("Encoder model path not found in config.")
-        if not decoder_model_abs_path:
-            raise FileNotFoundError("Decoder model path not found in config.")
+        if not encoder_rel_path:
+            raise ValueError("Config error: 'encoder_model_path' not found.")
+        if not decoder_rel_path:
+            raise ValueError("Config error: 'decoder_model_path' not found.")
 
-        self.model = BacteriaONNX(model_path=encoder_model_abs_path)
+        # 2. 使用我们新的辅助函数将相对路径转换为绝对路径
+        encoder_model_abs_path = get_resource_path(encoder_rel_path)
+        decoder_model_abs_path = get_resource_path(decoder_rel_path)
+
+        # 3. 将两个【绝对路径】都传递给 BacteriaONNX 的构造函数
+        #    我们稍后会修改 BacteriaONNX 来接收这两个路径
+        self.model = BacteriaONNX(
+            encoder_path=encoder_model_abs_path,
+            decoder_path=decoder_model_abs_path,
+            input_size=input_size
+        )
+        # ==================== 修改代码段 结束 ====================
+
         logging.info("✅ BacteriaAutoseg plugin loaded successfully.")
 
+    # --- 以下代码保持不变 ---
     def set_auto_labeling_reset_tracker(self):
         pass
 
