@@ -1,7 +1,7 @@
 # 文件路径: .github/workflows/build-windows-exe.yml
-# 【终极·手动安装版】 - 不再依赖任何第三方 Action，手动下载并安装 VC++ 运行库，确保 100% 可靠
+# 【终极强制打包版】 - 手动查找 onnxruntime 路径并使用 --add-binary 强制打包其所有二进制文件
 
-name: Build X-AnyLabeling for Windows (Final & Reliable)
+name: Build X-AnyLabeling for Windows (Final & Forceful)
 
 on:
   workflow_dispatch:
@@ -25,12 +25,10 @@ jobs:
           python-version: '3.10'
           architecture: 'x64'
 
-      # 3. 【核心修复】手动下载并安装 Microsoft Visual C++ 运行库
+      # 3. 安装 VC++ 运行库 (保留，以防万一)
       - name: Manually Install Microsoft Visual C++ Redistributable
         run: |
-          # 从微软官方稳定链接下载最新的 VC++ 运行库安装程序
           Invoke-WebRequest -Uri https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile vc_redist.x64.exe
-          # 以静默模式运行安装程序，并等待其完成
           Start-Process -FilePath .\vc_redist.x64.exe -ArgumentList '/install /passive /norestart' -Wait
 
       # 4. 安装所有 Python 依赖
@@ -40,10 +38,27 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
           
-      # 5. 使用 PyInstaller 打包
-      - name: Run PyInstaller (Single-Line Command)
-        run: >
-          pyinstaller --noconfirm --onedir --clean --console --name "BacteriaLabelingTool" --icon "anylabeling/resources/images/icon.ico" --add-data "models;models" --add-data "anylabeling/configs/auto_labeling/bacteria_autoseg.yaml;anylabeling/configs/auto_labeling" --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" --add-data "anylabeling/configs;anylabeling/configs" --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" --add-data "anylabeling/services/auto_labeling/configs/bert;anylabeling/services/auto_labeling/configs/bert" --add-data "anylabeling/services/auto_labeling/configs/clip;anylabeling/services/auto_labeling/configs/clip" --add-data "anylabeling/services/auto_labeling/configs/ppocr;anylabeling/services/auto_labeling/configs/ppocr" --add-data "anylabeling/services/auto_labeling/configs/ram;anylabeling/services/auto_labeling/configs/ram" anylabeling/app.py
+      # 5. 【核心修复】使用 PyInstaller 打包，并强制包含 ONNX Runtime 的二进制文件
+      - name: Run PyInstaller with Forced Binaries
+        run: |
+          # 动态获取 onnxruntime 库的安装路径
+          $ORT_PATH = python -c "import os, onnxruntime; print(os.path.dirname(onnxruntime.__file__))"
+          echo "ONNX Runtime Path found at: $ORT_PATH"
+          
+          # 运行 PyInstaller，使用 --add-binary 强制包含整个 onnxruntime 文件夹
+          pyinstaller --noconfirm --onedir --clean --console --name "BacteriaLabelingTool" `
+          --icon "anylabeling/resources/images/icon.ico" `
+          --add-data "models;models" `
+          --add-data "anylabeling/configs/auto_labeling/bacteria_autoseg.yaml;anylabeling/configs/auto_labeling" `
+          --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" `
+          --add-data "anylabeling/configs;anylabeling/configs" `
+          --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" `
+          --add-data "anylabeling/services/auto_labeling/configs/bert;anylabeling/services/auto_labeling/configs/bert" `
+          --add-data "anylabeling/services/auto_labeling/configs/clip;anylabeling/services/auto_labeling/configs/clip" `
+          --add-data "anylabeling/services/auto_labeling/configs/ppocr;anylabeling/services/auto_labeling/configs/ppocr" `
+          --add-data "anylabeling/services/auto_labeling/configs/ram;anylabeling/services/auto_labeling/configs/ram" `
+          --add-binary "$ORT_PATH;onnxruntime" `
+          anylabeling/app.py
 
       # 6. 上传最终产物
       - name: Upload Artifact
