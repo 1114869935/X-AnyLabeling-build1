@@ -128,53 +128,39 @@ class BacteriaONNX:
             return np.array([])
 
     def _process_single_point(self, point_data, image_embeddings, scale, H, W, new_h, new_w):
-        """
-        Processes a single point prompt to generate potential masks.
-        """
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', message='.*overflow.*')
             warnings.filterwarnings('ignore', message='.*invalid value.*')
-            
             px, py = point_data
             tx, ty = px * scale, py * scale
-            
             point_coords = np.array([[[tx, ty], [0.0, 0.0]]], dtype=np.float32)
             point_labels = np.array([[1.0, -1.0]], dtype=np.float32)
             mask_input = np.zeros((1, 1, 256, 256), dtype=np.float32)
             has_mask_input = np.array([0.0], dtype=np.float32)
             orig_im_size = np.array([H, W], dtype=np.float32)
-
-            feeds = {
-                "image_embeddings": image_embeddings,
-                "point_coords": point_coords,
-                "point_labels": point_labels,
-                "mask_input": mask_input,
-                "has_mask_input": has_mask_input,
-                "orig_im_size": orig_im_size
-            }
-            
+            feeds = {"image_embeddings": image_embeddings, "point_coords": point_coords, "point_labels": point_labels, "mask_input": mask_input, "has_mask_input": has_mask_input, "orig_im_size": orig_im_size}
             masks, ious, low_res_logits = self.dec_session.run(None, feeds)
-            
             results_for_point = []
             for i in range(masks.shape[1]):
                 iou = float(ious[0, i])
-                if iou < self.pred_iou_thresh:
-                    continue
-                
+                if iou < self.pred_iou_thresh: continue
                 logits_256 = low_res_logits[0, i]
                 prob_256 = _sigmoid(np.nan_to_num(np.clip(logits_256, -100, 100)))
                 prob_1024 = cv2.resize(prob_256, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
                 prob_padded = prob_1024[:new_h, :new_w]
                 prob_blurred = cv2.GaussianBlur(prob_padded, (5, 5), 0)
-                
                 upscale_factor = 2
                 prob_upscaled = cv2.resize(prob_blurred, (W * upscale_factor, H * upscale_factor), interpolation=cv2.INTER_CUBIC)
                 mask_upscaled = (prob_upscaled >= self.mask_threshold)
                 final_mask = cv2.resize(mask_upscaled.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
-                
-                if np.count_nonzero(final_mask) > 0:
+
+                # ======================= 【核心修复点】 =======================
+                # 在这里立即过滤掉过小的、无用的 mask，而不是等收集完所有结果之后。
+                # 这将极大地减少内存占用和后续处理的计算量。
+                if np.count_nonzero(final_mask) > self.min_mask_region_area:
                     results_for_point.append({"mask": final_mask, "iou": iou})
-                    
+                # =============================================================
+            
             return results_for_point
 
     def _find_petri_dish(self, gray_image: np.ndarray) -> np.ndarray:
