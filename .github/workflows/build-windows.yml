@@ -1,5 +1,5 @@
 # 文件路径: .github/workflows/build-windows-exe.yml
-# 【终极保险版】 - 将 PyInstaller 命令写在单行，彻底避免 PowerShell 换行符解析错误
+# 【Git LFS 修正版】 - 增加了 LFS 参数来拉取真实的模型大文件
 
 name: Build X-AnyLabeling for Windows (Complete)
 
@@ -11,8 +11,12 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
+      # 【重要修正】: 在 checkout 步骤中增加了 lfs: true 和 fetch-depth: 0
+      - name: Checkout repository with LFS
         uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,7 +31,6 @@ jobs:
           pip install -r requirements.txt
           
       - name: Run PyInstaller (Single-Line Command)
-        # 【重要修正】: 使用单行命令来确保 PowerShell 不会出错。
         run: >
           pyinstaller --noconfirm --onedir --clean --windowed --name "BacteriaLabelingTool" --icon "anylabeling/resources/images/icon.ico" --add-data "models;models" --add-data "anylabeling/configs/auto_labeling/bacteria_autoseg.yaml;anylabeling/configs/auto_labeling" --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" --add-data "anylabeling/configs;anylabeling/configs" --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" --add-data "anylabeling/services/auto_labeling/configs/bert;anylabeling/services/auto_labeling/configs/bert" --add-data "anylabeling/services/auto_labeling/configs/clip;anylabeling/services/auto_labeling/configs/clip" --add-data "anylabeling/services/auto_labeling/configs/ppocr;anylabeling/services/auto_labeling/configs/ppocr" --add-data "anylabeling/services/auto_labeling/configs/ram;anylabeling/services/auto_labeling/configs/ram" anylabeling/app.py
 
