@@ -34,7 +34,8 @@ from anylabeling.views.labeling.utils.update_checker import (
 
 # NOTE: Do not remove this import, it is required for loading translations
 from anylabeling.resources import resources
-
+import sys
+sys.setrecursionlimit(5000)
 
 def main():
     parser = argparse.ArgumentParser()
