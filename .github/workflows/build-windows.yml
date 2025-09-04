@@ -11,21 +11,22 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # 1) 拉代码 + LFS（模型）
       - name: Checkout (with LFS)
         uses: actions/checkout@v4
         with:
           lfs: true
           fetch-depth: 0
 
+      # 2) 打印工程与模型，方便排查
       - name: Print repo tree & find spec
         shell: pwsh
         run: |
-          Write-Host "=== repo files (top-level) ==="
+          Write-Host "=== Top-level files ==="
           Get-ChildItem -Force | Select-Object Name,Length,Mode
-          Write-Host "`n=== find *.spec ==="
+          Write-Host "`n=== Find *.spec ==="
           $specs = Get-ChildItem -Recurse -Filter *.spec | Select-Object -ExpandProperty FullName
           if ($specs) { $specs | ForEach-Object { Write-Host "FOUND SPEC: $_" } } else { Write-Warning "No .spec found" }
-          # 保存第一个 spec 路径到文件(后面读取)
           if ($specs) { $specs | Select-Object -First 1 | Out-File -Encoding ascii build_spec_path.txt }
 
       - name: List models (sanity)
@@ -38,11 +39,13 @@ jobs:
             Write-Warning "models/ NOT found (will still try to build)"
           }
 
+      # 3) Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
+      # 4) 依赖安装（健壮）
       - name: Install dependencies (robust)
         shell: pwsh
         run: |
@@ -54,12 +57,13 @@ jobs:
             Write-Host "Installing from requirements-dev.txt"
             pip install -r requirements-dev.txt
           } else {
-            Write-Warning "requirements*.txt not found, installing common deps"
+            Write-Warning "requirements*.txt not found; installing common deps"
           }
-          # 兜底：常见依赖（按你项目实际可再精简/增补）
           pip install pyinstaller
+          # 常用依赖（按项目实际可删改）
           pip install PyQt5 shapely numpy pillow onnxruntime opencv-python scikit-image pyqtgraph tqdm requests
 
+      # 5) 构建：优先用 .spec；没有就兜底用入口脚本，并把 models 打进包
       - name: Build (prefer .spec; fallback to entry script)
         shell: pwsh
         run: |
@@ -69,7 +73,6 @@ jobs:
             pyinstaller --noconfirm "$spec"
           } else {
             Write-Warning "No .spec found, fallback to script build"
-            # 入口脚本兜底猜测：请按你仓库实际入口替换
             $entryCandidates = @(
               "x_anylabeling.py",
               "x-anylabeling.py",
@@ -81,22 +84,28 @@ jobs:
             foreach ($c in $entryCandidates) {
               if (Test-Path $c) { $entry = $c; break }
             }
-            if (-not $entry) { throw "Cannot find entry script. Please put your entry (e.g. anylabeling/app.py) into the list." }
+            if (-not $entry) { throw "Cannot find entry script. Please add your real entry (e.g. anylabeling/app.py) to the list above." }
 
-            # 把 models 打进包（datas）
             $datas = "models;models"
             pyinstaller --noconfirm --name X-AnyLabeling `
               --add-data "$datas" `
               --clean "$entry"
           }
 
-      - name: Ensure models copied into dist (double-safety)
+      # 6) 打包前查看 dist 内容
+      - name: Show dist content (before copy)
+        shell: pwsh
+        run: Get-ChildItem -Recurse dist | Select-Object FullName,Length
+
+      # 7) 双保险：把 models 放到生成的 .exe 同级目录（兼容 onedir/onefile）
+      - name: Ensure models copied next to the EXE (robust)
         shell: pwsh
         run: |
           if (Test-Path models) {
-            $appDir = Get-ChildItem dist -Directory | Select-Object -First 1
-            if ($null -eq $appDir) { throw "No app dir found under dist" }
-            $dst = Join-Path $appDir.FullName "models"
+            $exe = Get-ChildItem -Recurse dist -Filter *.exe | Select-Object -First 1
+            if ($null -eq $exe) { throw "No .exe produced under dist" }
+            $outDir = Split-Path $exe.FullName -Parent
+            $dst = Join-Path $outDir "models"
             New-Item -ItemType Directory -Force -Path $dst | Out-Null
             Copy-Item -Recurse -Force models\* $dst\
             Write-Host "✅ Models copied to $dst"
@@ -104,12 +113,12 @@ jobs:
             Write-Warning "models/ not found; skip copy"
           }
 
-      - name: Show dist content
+      # 8) 再次查看 dist
+      - name: Show dist content (after copy)
         shell: pwsh
-        run: |
-          Write-Host "=== dist tree ==="
-          Get-ChildItem -Recurse dist | Select-Object FullName,Length
+        run: Get-ChildItem -Recurse dist | Select-Object FullName,Length
 
+      # 9) 压缩成 zip
       - name: Package zip
         shell: pwsh
         run: |
@@ -117,20 +126,21 @@ jobs:
           Compress-Archive -Path dist\* -DestinationPath X-AnyLabeling-win.zip
           Write-Host "Zip created: X-AnyLabeling-win.zip"
 
+      # 10) 备份到 Artifact（页面可下载）
       - name: Upload artifact (backup)
         uses: actions/upload-artifact@v4
         with:
           name: X-AnyLabeling-win
           path: X-AnyLabeling-win.zip
 
+      # 11) 自动发 Release（生成下载链接）
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ github.run_number }}
           name: "Windows Build #${{ github.run_number }}"
           body: |
-            自动生成的 Windows 包（含模型）。
-            若运行异常，请检查 dist 目录结构及模型路径。
+            自动生成的 Windows 包（含 models/）。若运行异常，请检查 dist 目录结构及模型路径。
           files: X-AnyLabeling-win.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
