@@ -1,5 +1,5 @@
 # 文件路径: .github/workflows/build-windows-exe.yml
-# 【最终修复·完整版】 - 包含所有修正：Python 3.10, Git LFS, 单行命令, 以及最重要的 VC++ 运行库
+# 【最终·有效Action版】 - 替换了失效的 VC++ 安装 Action
 
 name: Build X-AnyLabeling for Windows (Final)
 
@@ -25,9 +25,9 @@ jobs:
           python-version: '3.10'
           architecture: 'x64'
 
-      # 3. 【核心修复】安装 ONNX Runtime 所需的系统级依赖库
+      # 3. 【核心修复】使用一个有效的 Action 来安装 ONNX Runtime 所需的系统级依赖库
       - name: Install Microsoft Visual C++ Redistributable
-        uses: mdaro/install-vcredist@v1
+        uses: hustcer/install-vcredist@v1
 
       # 4. 安装所有 Python 依赖
       - name: Install Python dependencies
