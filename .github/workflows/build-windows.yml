@@ -1,5 +1,5 @@
 # 文件路径: .github/workflows/build-windows-exe.yml
-# 【PowerShell 语法修正版】 - 将CMD的换行符(^)替换为PowerShell的换行符(`)
+# 【最终路径修正版】 - 修正了 bacteria_autoseg.yaml 的实际文件路径
 
 name: Build X-AnyLabeling for Windows (Complete)
 
@@ -27,14 +27,14 @@ jobs:
           pip install -r requirements.txt
           
       - name: Run PyInstaller (with all resources)
-        # 【重要修正】: 下面的多行命令使用了 PowerShell 的换行符 (`)
         run: |
           pyinstaller --noconfirm --onedir --clean `
           --windowed `
           --name "BacteriaLabelingTool" `
           --icon "anylabeling/resources/images/icon.ico" `
           --add-data "models;models" `
-          --add-data "anylabeling/services/auto_labeling/bacteria_autoseg.yaml;anylabeling/services/auto_labeling" `
+          # 【重要修正】: 修正了下面这一行中 bacteria_autoseg.yaml 的源文件路径
+          --add-data "anylabeling/configs/auto_labeling/bacteria_autoseg.yaml;anylabeling/configs/auto_labeling" `
           --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" `
           --add-data "anylabeling/configs;anylabeling/configs" `
           --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" `
