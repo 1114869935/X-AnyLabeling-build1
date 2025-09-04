@@ -1,157 +1,67 @@
-name: Build Windows App
+# 这是最终、完整的 GitHub Actions 工作流文件
+# 它将使用我们新创建的 build-windows-final.spec 文件来构建一个修复后的 Windows 程序
 
+name: Build Patched Windows App
+
+# 触发条件：手动触发 或 推送到 main 分支时
 on:
   workflow_dispatch:
   push:
     branches:
       - main
 
-# 1. 【修复】为整个工作流授予创建 Release 所需的写入权限
+# 【权限修复】授予创建 Release 所需的写入权限
 permissions:
   contents: write
 
 jobs:
   build:
+    # 使用 Windows 最新环境进行构建
     runs-on: windows-latest
 
     steps:
-      # 1) 拉取代码 + LFS（模型）
-      - name: Checkout (with LFS)
+      # 第1步：拉取你的所有代码（包括新建的 .spec 和 .py 文件）
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          lfs: true
-          fetch-depth: 0
+          lfs: true # 如果模型文件使用LFS，这个选项很重要
 
-      # 2) 打印工程与模型，方便排查
-      - name: Print repo tree & find spec
-        shell: pwsh
-        run: |
-          Write-Host "=== Top-level files ==="
-          Get-ChildItem -Force | Select-Object Name,Length,Mode
-          Write-Host "`n=== Find *.spec ==="
-          $specs = Get-ChildItem -Recurse -Filter *.spec | Select-Object -ExpandProperty FullName
-          if ($specs) { $specs | ForEach-Object { Write-Host "FOUND SPEC: $_" } } else { Write-Warning "No .spec found" }
-          if ($specs) { $specs | Select-Object -First 1 | Out-File -Encoding ascii build_spec_path.txt }
-
-      - name: List models (sanity)
-        shell: pwsh
-        run: |
-          if (Test-Path models) {
-            Write-Host "=== models/ ==="
-            Get-ChildItem -Recurse models | Select-Object FullName,Length
-          } else {
-            Write-Warning "models/ NOT found (will still try to build)"
-          }
-
-      # 3) Python 环境
+      # 第2步：设置 Python 3.10 环境，并启用缓存加速后续构建
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          # 2. 【优化】增加 pip 缓存，加速后续构建
           cache: 'pip'
 
-      # 4) 依赖安装（健壮）
-      - name: Install dependencies (robust)
-        shell: pwsh
+      # 第3步：安装所有 Python 依赖
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip wheel
-          if (Test-Path requirements.txt) {
-            Write-Host "Installing from requirements.txt"
-            pip install -r requirements.txt
-          } elseif (Test-Path requirements-dev.txt) {
-            Write-Host "Installing from requirements-dev.txt"
-            pip install -r requirements-dev.txt
-          } else {
-            Write-Warning "requirements*.txt not found; installing common deps"
-          }
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
           pip install pyinstaller
-          # 常用依赖（按项目实际可删改）
-          pip install PyQt5 shapely numpy pillow onnxruntime opencv-python scikit-image pyqtgraph tqdm requests
 
-      # 5) 构建：优先用 .spec；没有就兜底用入口脚本
-      - name: Build (prefer .spec; fallback to entry script)
-        shell: pwsh
+      # 第4步：【核心】使用我们全新的、最终的配置文件进行打包
+      - name: Build EXE with Final Spec
+        run: pyinstaller --noconfirm build-windows-final.spec
+
+      # 第5步：将 models 文件夹复制到打包好的程序旁边
+      # 注意：目标文件夹名称 'X-AnyLabeling-Patched' 与 .spec 文件中定义的名字一致
+      - name: Copy Models Folder
+        run: Copy-Item -Path models -Destination dist/X-AnyLabeling-Patched -Recurse -Force
+
+      # 第6步：将最终产物压缩成一个 .zip 文件
+      - name: Package to Zip
         run: |
-          $spec = $(Get-Content build_spec_path.txt -ErrorAction SilentlyContinue)
-          if ($spec) {
-            Write-Host "Using spec: $spec"
-            pyinstaller --noconfirm "$spec"
-          } else {
-            Write-Warning "No .spec found, fallback to script build"
-            $entryCandidates = @(
-              "x_anylabeling.py",
-              "x-anylabeling.py",
-              "anylabeling/app.py",
-              "main.py",
-              "run.py"
-            )
-            $entry = $null
-            foreach ($c in $entryCandidates) {
-              if (Test-Path $c) { $entry = $c; break }
-            }
-            if (-not $entry) { throw "Cannot find entry script. Please add your real entry (e.g. anylabeling/app.py) to the list above." }
+          Compress-Archive -Path dist/X-AnyLabeling-Patched/* -DestinationPath X-AnyLabeling-Win-Patched-v${{ github.run_number }}.zip
+          echo "ZIP_NAME=X-AnyLabeling-Win-Patched-v${{ github.run_number }}.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-            $datas = "models;models"
-            pyinstaller --noconfirm --name X-AnyLabeling `
-              --add-data "$datas" `
-              --clean "$entry"
-          }
-
-      # 6) 打包前查看 dist 内容
-      - name: Show dist content (before copy)
-        shell: pwsh
-        run: Get-ChildItem -Recurse dist | Select-Object FullName,Length
-
-      # 7) 双保险：把 models 放到生成的 .exe 同级目录
-      - name: Ensure models copied next to the EXE (robust)
-        shell: pwsh
-        run: |
-          if (Test-Path models) {
-            $exe = Get-ChildItem -Recurse dist -Filter *.exe | Select-Object -First 1
-            if ($null -eq $exe) { throw "No .exe produced under dist" }
-            $outDir = Split-Path $exe.FullName -Parent
-            $dst = Join-Path $outDir "models"
-            New-Item -ItemType Directory -Force -Path $dst | Out-Null
-            Copy-Item -Recurse -Force models\* $dst\
-            Write-Host "✅ Models copied to $dst"
-          } else {
-            Write-Warning "models/ not found; skip copy"
-          }
-
-      # 8) 再次查看 dist
-      - name: Show dist content (after copy)
-        shell: pwsh
-        run: Get-ChildItem -Recurse dist | Select-Object FullName,Length
-
-      # 9) 压缩成 zip
-      - name: Package zip
-        shell: pwsh
-        run: |
-          # 3. 【优化】压缩包带上版本号，方便识别
-          $zipName = "X-AnyLabeling-win-v${{ github.run_number }}.zip"
-          if (Test-Path $zipName) { Remove-Item $zipName -Force }
-          Compress-Archive -Path dist\* -DestinationPath $zipName
-          Write-Host "Zip created: $zipName"
-          # 将 zip 名称写入环境变量，供后续步骤使用
-          echo "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      # 10) 备份到 Artifact（页面可下载）
-      - name: Upload artifact (backup)
-        uses: actions/upload-artifact@v4
-        with:
-          name: X-AnyLabeling-win-v${{ github.run_number }}
-          path: ${{ env.ZIP_NAME }}
-
-      # 11) 自动发 Release
-      - name: Create GitHub Release
-        # 4. 【优化】更新到最新的 v2 版本
+      # 第7步：创建 GitHub Release 并上传 .zip 文件
+      - name: Upload and Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: "Windows Build #${{ github.run_number }}"
-          body: |
-            自动生成的 Windows 包（含 models/）。若运行异常，请检查 dist 目录结构及模型路径。
+          tag_name: v${{ github.run_number }}-patched
+          name: "Windows Patched Build #${{ github.run_number }}"
+          body: "这是一个修复版构建，已解决模型加载、路径和隐藏依赖问题。"
           files: ${{ env.ZIP_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
