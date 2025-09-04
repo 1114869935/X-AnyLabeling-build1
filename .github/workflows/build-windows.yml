@@ -1,8 +1,8 @@
 name: Build Windows App
 
 on:
-  workflow_dispatch:        # 可以手动点按钮触发
-  push:                     # 推 main 分支时也会触发
+  workflow_dispatch:        # 手动触发
+  push:                     # 推送到 main 分支时自动触发
     branches:
       - main
 
@@ -10,10 +10,21 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (with LFS)
         uses: actions/checkout@v4
         with:
-          lfs: true          # 确保 Git LFS 文件（模型）也被拉取
+          lfs: true
+          fetch-depth: 0     # 把完整提交历史都拿到，保证 LFS 正常
+
+      - name: Sanity check: list models
+        shell: pwsh
+        run: |
+          if (Test-Path models) {
+            Write-Host "=== Found models/ directory ==="
+            Get-ChildItem -Recurse models | Select-Object FullName,Length
+          } else {
+            Write-Warning "models/ NOT found!"
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,8 +40,25 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm x-anylabeling-win-cpu.spec
 
+      - name: Copy models into dist
+        shell: pwsh
+        run: |
+          if (Test-Path models) {
+            $app = Get-ChildItem dist -Directory | Select-Object -First 1
+            if ($null -eq $app) { throw "No app dir found under dist" }
+            $dst = Join-Path $app.FullName "models"
+            New-Item -ItemType Directory -Force -Path $dst | Out-Null
+            Copy-Item -Recurse -Force models\* $dst\
+            Write-Host "✅ Models copied to $dst"
+          } else {
+            Write-Warning "models/ not found; skipping copy"
+          }
+
+      - name: Package zip
+        run: powershell Compress-Archive -Path dist\* -DestinationPath X-AnyLabeling-win.zip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: X-AnyLabeling-win
-          path: dist/**
+          path: X-AnyLabeling-win.zip
