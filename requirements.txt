@@ -4,7 +4,7 @@ PyQtWebEngine==5.15.7
 natsort==8.1.0
 termcolor==1.1.0
 onnx>=1.13.1
-onnxruntime>=1.16.0
+onnxruntime==1.15.1
 qimage2ndarray==1.10.0
 lapx==0.5.5
 numpy<=1.26.4
