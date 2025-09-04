@@ -1,18 +1,8 @@
-# 文件路径: anylabeling/app.py
-# 【最终·强制坐标系修复版 - 完整文件】
-
 import os
-import sys
-
-# ======================= 【核心修复点】 =======================
-# 在导入任何 PyQt/Qt 组件之前，设置所有最高优先级的环境变量
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-os.environ["QT_SCALE_FACTOR"] = ""
-if sys.platform == "win32":
-    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-# =============================================================
 
 # Temporary fix for: bus error
+# Source: https://stackoverflow.com/questions/73072612/
+# why-does-np-linalg-solve-raise-bus-error-when-running-on-its-own-thread-mac-m1
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -24,6 +14,7 @@ import argparse
 import codecs
 import logging
 
+import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -47,7 +38,102 @@ from anylabeling.resources import resources
 
 def main():
     parser = argparse.ArgumentParser()
-    # ... (所有 argparse 的代码保持不变) ...
+    parser.add_argument(
+        "--reset-config", action="store_true", help="reset qt config"
+    )
+    parser.add_argument(
+        "--logger-level",
+        default="info",
+        choices=["debug", "info", "warning", "fatal", "error"],
+        help="logger level",
+    )
+    parser.add_argument(
+        "--no-auto-update-check",
+        action="store_true",
+        help="disable automatic update check on startup",
+    )
+    parser.add_argument(
+        "filename",
+        nargs="?",
+        help=(
+            "image or label filename; "
+            "If a directory path is passed in, the folder will be loaded automatically"
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        "-O",
+        "-o",
+        help=(
+            "output file or directory (if it ends with .json it is "
+            "recognized as file, else as directory)"
+        ),
+    )
+    default_config_file = os.path.join(
+        os.path.expanduser("~"), ".xanylabelingrc"
+    )
+    parser.add_argument(
+        "--config",
+        dest="config",
+        help=(
+            "config file or yaml-format string (default:"
+            f" {default_config_file})"
+        ),
+        default=default_config_file,
+    )
+    # config for the gui
+    parser.add_argument(
+        "--nodata",
+        dest="store_data",
+        action="store_false",
+        help="stop storing image data to JSON file",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--autosave",
+        dest="auto_save",
+        action="store_true",
+        help="auto save",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--nosortlabels",
+        dest="sort_labels",
+        action="store_false",
+        help="stop sorting labels",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--flags",
+        help="comma separated list of flags OR file containing flags",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--labelflags",
+        dest="label_flags",
+        help=r"yaml string of label specific flags OR file containing json "
+        r"string of label specific flags (ex. {person-\d+: [male, tall], "
+        r"dog-\d+: [black, brown, white], .*: [occluded]})",  # NOQA
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--labels",
+        help="comma separated list of labels OR file containing labels",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--validatelabel",
+        dest="validate_label",
+        choices=["exact"],
+        help="label validation types",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--keep-prev",
+        action="store_true",
+        help="keep annotation of previous frame",
+        default=argparse.SUPPRESS,
+    )
     parser.add_argument(
         "--epsilon",
         type=float,
@@ -56,7 +142,20 @@ def main():
     )
     args = parser.parse_args()
 
-    # ... (所有 args 的处理代码保持不变) ...
+    if hasattr(args, "flags"):
+        if os.path.isfile(args.flags):
+            with codecs.open(args.flags, "r", encoding="utf-8") as f:
+                args.flags = [line.strip() for line in f if line.strip()]
+        else:
+            args.flags = [line for line in args.flags.split(",") if line]
+
+    if hasattr(args, "labels"):
+        if os.path.isfile(args.labels):
+            with codecs.open(args.labels, "r", encoding="utf-8") as f:
+                args.labels = [line.strip() for line in f if line.strip()]
+        else:
+            args.labels = [line for line in args.labels.split(",") if line]
+
     if hasattr(args, "label_flags"):
         if os.path.isfile(args.label_flags):
             with codecs.open(args.label_flags, "r", encoding="utf-8") as f:
@@ -101,12 +200,13 @@ def main():
     loaded_language = translator.load(
         ":/languages/translations/" + language + ".qm"
     )
-    
-    # 再次调用 setAttribute，与环境变量配合，形成最强保障
-    if sys.platform == "win32":
-        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
-        
-    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
+    # Enable scaling for high dpi screens
+    QtWidgets.QApplication.setAttribute(
+        QtCore.Qt.AA_EnableHighDpiScaling, True
+    )  # enable highdpi scaling
+    QtWidgets.QApplication.setAttribute(
+        QtCore.Qt.AA_UseHighDpiPixmaps, True
+    )  # use highdpi icons
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts)
 
     app = QtWidgets.QApplication(sys.argv)
