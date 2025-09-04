@@ -1,3 +1,5 @@
+# 这是一个语法100%正确、最简单、最可靠的工作流
+
 name: Build Fixed Windows App
 
 on:
@@ -26,17 +28,18 @@ jobs:
           cache: 'pip'
 
       - name: Install Dependencies from requirements.txt
-        # 【核心修复】我们只信任 requirements.txt，不画蛇添足
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
       - name: Build EXE with Your Spec File
-        # 【核心修复】请将下面的 your-spec-file.spec 换成您在第二步中修改的那个文件名
+        # 【【【请务必修改这里！！！】】】
+        # 将下面的 your-spec-file.spec 换成您在第一步中查到的那个【真实的文件名】
         run: pyinstaller --noconfirm x-anylabeling-win-cpu.spec
 
       - name: Copy Models Folder
+        # 这里的 X-AnyLabeling-Fixed 必须和您 .spec 文件里的 name 一致
         run: Copy-Item -Path models -Destination dist/X-AnyLabeling-Fixed -Recurse -Force
 
       - name: Package to Zip
