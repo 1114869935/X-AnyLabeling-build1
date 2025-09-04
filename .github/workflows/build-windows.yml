@@ -1,58 +1,50 @@
-# 这是一个语法100%正确、最简单、最可靠的工作流
+# 文件路径: .github/workflows/build-windows-exe.yml
+# 【最终加强版】 - 结合了官方 .spec 文件的所有资源，确保完整性
 
-name: Build Fixed Windows App
+name: Build X-AnyLabeling for Windows (Complete)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-
-permissions:
-  contents: write
 
 jobs:
-  build:
+  build-on-windows:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
-          cache: 'pip'
+          python-version: '3.9'
+          architecture: 'x64'
 
-      - name: Install Dependencies from requirements.txt
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
           pip install pyinstaller
-
-      - name: Build EXE with Your Spec File
-        # 【【【请务必修改这里！！！】】】
-        # 将下面的 your-spec-file.spec 换成您在第一步中查到的那个【真实的文件名】
-        run: pyinstaller --noconfirm x-anylabeling-win-cpu.spec
-
-      - name: Copy Models Folder
-        # 这里的 X-AnyLabeling-Fixed 必须和您 .spec 文件里的 name 一致
-        run: Copy-Item -Path models -Destination dist/X-AnyLabeling-Fixed -Recurse -Force
-
-      - name: Package to Zip
+          pip install -r requirements.txt
+          
+      - name: Run PyInstaller (with all resources)
         run: |
-          Compress-Archive -Path dist/X-AnyLabeling-Fixed/* -DestinationPath X-AnyLabeling-Win-Fixed-v${{ github.run_number }}.zip
-          echo "ZIP_NAME=X-AnyLabeling-Win-Fixed-v${{ github.run_number }}.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          pyinstaller --noconfirm --onedir --clean ^
+          --windowed ^
+          --name "BacteriaLabelingTool" ^
+          --icon "anylabeling/resources/images/icon.ico" ^
+          --add-data "models;models" ^
+          --add-data "anylabeling/services/auto_labeling/bacteria_autoseg.yaml;anylabeling/services/auto_labeling" ^
+          --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" ^
+          --add-data "anylabeling/configs;anylabeling/configs" ^
+          --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" ^
+          --add-data "anylabeling/services/auto_labeling/configs/bert;anylabeling/services/auto_labeling/configs/bert" ^
+          --add-data "anylabeling/services/auto_labeling/configs/clip;anylabeling/services/auto_labeling/configs/clip" ^
+          --add-data "anylabeling/services/auto_labeling/configs/ppocr;anylabeling/services/auto_labeling/configs/ppocr" ^
+          --add-data "anylabeling/services/auto_labeling/configs/ram;anylabeling/services/auto_labeling/configs/ram" ^
+          anylabeling/app.py
 
-      - name: Upload and Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ github.run_number }}-fixed
-          name: "Windows Fixed Build #${{ github.run_number }}"
-          body: "此版本已修复模型加载的路径问题。"
-          files: ${{ env.ZIP_NAME }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: windows-release
+          path: dist/BacteriaLabelingTool
