@@ -1,5 +1,5 @@
 # 文件路径: .github/workflows/build-windows-exe.yml
-# 【最终加强版】 - 结合了官方 .spec 文件的所有资源，确保完整性
+# 【PowerShell 语法修正版】 - 将CMD的换行符(^)替换为PowerShell的换行符(`)
 
 name: Build X-AnyLabeling for Windows (Complete)
 
@@ -27,20 +27,21 @@ jobs:
           pip install -r requirements.txt
           
       - name: Run PyInstaller (with all resources)
+        # 【重要修正】: 下面的多行命令使用了 PowerShell 的换行符 (`)
         run: |
-          pyinstaller --noconfirm --onedir --clean ^
-          --windowed ^
-          --name "BacteriaLabelingTool" ^
-          --icon "anylabeling/resources/images/icon.ico" ^
-          --add-data "models;models" ^
-          --add-data "anylabeling/services/auto_labeling/bacteria_autoseg.yaml;anylabeling/services/auto_labeling" ^
-          --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" ^
-          --add-data "anylabeling/configs;anylabeling/configs" ^
-          --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" ^
-          --add-data "anylabeling/services/auto_labeling/configs/bert;anylabeling/services/auto_labeling/configs/bert" ^
-          --add-data "anylabeling/services/auto_labeling/configs/clip;anylabeling/services/auto_labeling/configs/clip" ^
-          --add-data "anylabeling/services/auto_labeling/configs/ppocr;anylabeling/services/auto_labeling/configs/ppocr" ^
-          --add-data "anylabeling/services/auto_labeling/configs/ram;anylabeling/services/auto_labeling/configs/ram" ^
+          pyinstaller --noconfirm --onedir --clean `
+          --windowed `
+          --name "BacteriaLabelingTool" `
+          --icon "anylabeling/resources/images/icon.ico" `
+          --add-data "models;models" `
+          --add-data "anylabeling/services/auto_labeling/bacteria_autoseg.yaml;anylabeling/services/auto_labeling" `
+          --add-data "anylabeling/configs/auto_labeling;anylabeling/configs/auto_labeling" `
+          --add-data "anylabeling/configs;anylabeling/configs" `
+          --add-data "anylabeling/views/labeling/widgets/auto_labeling/auto_labeling.ui;anylabeling/views/labeling/widgets/auto_labeling" `
+          --add-data "anylabeling/services/auto_labeling/configs/bert;anylabeling/services/auto_labeling/configs/bert" `
+          --add-data "anylabeling/services/auto_labeling/configs/clip;anylabeling/services/auto_labeling/configs/clip" `
+          --add-data "anylabeling/services/auto_labeling/configs/ppocr;anylabeling/services/auto_labeling/configs/ppocr" `
+          --add-data "anylabeling/services/auto_labeling/configs/ram;anylabeling/services/auto_labeling/configs/ram" `
           anylabeling/app.py
 
       - name: Upload Artifact
