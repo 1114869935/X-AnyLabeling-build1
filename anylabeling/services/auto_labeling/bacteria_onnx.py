@@ -13,55 +13,61 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return np.where(x >= 0, 1 / (1 + np.exp(-x)), np.exp(x) / (1 + np.exp(x)))
 
 class BacteriaONNX:
-    """
-    Handles ONNX model loading and inference for bacteria segmentation.
-    Modified to accept direct, absolute paths for encoder and decoder models,
-    making it compatible with PyInstaller-packaged applications.
-    """
-    
-    # ==================== 修改后的 __init__ 方法 ====================
+    # 【使用这个"CPU强制+详细日志"的 __init__ 方法来替换您原来的版本】
     def __init__(self, encoder_path: str, decoder_path: str, input_size: int = 1024):
-        """
-        Initializes the BacteriaONNX model loader.
+        print("--- [DEBUG] Initializing BacteriaONNX (CPU Force Mode) ---")
+        print(f"[DEBUG] Received encoder_path: {encoder_path}")
+        print(f"[DEBUG] Received decoder_path: {decoder_path}")
 
-        Args:
-            encoder_path (str): The absolute path to the encoder ONNX model.
-            decoder_path (str): The absolute path to the decoder ONNX model.
-            input_size (int): The target input size for the model.
-        """
         self.input_size = input_size
         self.points_per_side = 64
         self.pred_iou_thresh = 0.85
         self.min_mask_region_area = 120
-        self.box_nms_thresh = 0.3 
+        self.box_nms_thresh = 0.3
         self.max_area_ratio = 0.04
         self.min_circularity = 0.25
         self.mask_threshold = 0.5
 
         try:
-            # 直接使用外部传入的、已经解析好的绝对路径
-            # 删除了所有内部的 os.path.join 和 os.path.dirname 逻辑
-            logging.info(f"Attempting to load encoder model from: {encoder_path}")
-            logging.info(f"Attempting to load decoder model from: {decoder_path}")
+            print(f"[DEBUG] Checking if encoder file exists at the path...")
+            if not os.path.exists(encoder_path):
+                print(f"[FATAL ERROR] Encoder model not found at resolved path: {encoder_path}")
+                raise FileNotFoundError(f"Encoder model not found at: {encoder_path}")
+            print("[DEBUG] Encoder file found!")
 
-            if not os.path.exists(encoder_path): 
-                raise FileNotFoundError(f"Encoder model not found at resolved path: {encoder_path}")
-            if not os.path.exists(decoder_path): 
-                raise FileNotFoundError(f"Decoder model not found at resolved path: {decoder_path}")
-            
+            print(f"[DEBUG] Checking if decoder file exists at the path...")
+            if not os.path.exists(decoder_path):
+                print(f"[FATAL ERROR] Decoder model not found at resolved path: {decoder_path}")
+                raise FileNotFoundError(f"Decoder model not found at: {decoder_path}")
+            print("[DEBUG] Decoder file found!")
+
             so = onnxruntime.SessionOptions()
-            # 尝试使用CUDA，如果不可用，ONNX Runtime会自动回退到CPU
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
             
+            # ======================= 【核心修改点】 =======================
+            # 我们删除了 'CUDAExecutionProvider'，强制 ONNX 只使用 CPU。
+            # 这可以绕过所有 GPU 驱动问题，是解决“卡死”问题的最有效手段。
+            providers = ['CPUExecutionProvider']
+            print(f"[DEBUG] Forcing ONNX Runtime to use providers: {providers}")
+            # =============================================================
+            
+            print(f"[DEBUG] Attempting to load ENCODER model into ONNX Runtime Session...")
             self.enc_session = onnxruntime.InferenceSession(encoder_path, sess_options=so, providers=providers)
+            print("[DEBUG] ENCODER model loaded successfully!")
+
+            print(f"[DEBUG] Attempting to load DECODER model into ONNX Runtime Session...")
             self.dec_session = onnxruntime.InferenceSession(decoder_path, sess_options=so, providers=providers)
-            
+            print("[DEBUG] DECODER model loaded successfully!")
+
             self.enc_input_name = self.enc_session.get_inputs()[0].name
-            logging.info(f"ONNX models loaded successfully, using providers: {self.enc_session.get_providers()}")
+            print(f"[DEBUG] ONNX models initialized, using providers: {self.enc_session.get_providers()}")
+            print("--- [DEBUG] BacteriaONNX Initialization Complete ---")
 
         except Exception as e:
-            logging.error(f"Failed to load ONNX models. Error: {e}", exc_info=True)
-            # 重新抛出异常，让上层调用者知道初始化失败
+            import traceback
+            print("[FATAL ERROR] An exception occurred during ONNX model loading!")
+            print(str(e))
+            traceback.print_exc()
+            input("Press Enter to exit...") 
             raise e
     # ==================== __init__ 方法修改结束 ====================
 
