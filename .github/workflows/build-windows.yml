@@ -1,67 +1,55 @@
-# 这是最终、完整的 GitHub Actions 工作流文件
-# 它将使用我们新创建的 build-windows-final.spec 文件来构建一个修复后的 Windows 程序
+name: Build Fixed Windows App
 
-name: Build Patched Windows App
-
-# 触发条件：手动触发 或 推送到 main 分支时
 on:
   workflow_dispatch:
   push:
     branches:
       - main
 
-# 【权限修复】授予创建 Release 所需的写入权限
 permissions:
   contents: write
 
 jobs:
   build:
-    # 使用 Windows 最新环境进行构建
     runs-on: windows-latest
 
     steps:
-      # 第1步：拉取你的所有代码（包括新建的 .spec 和 .py 文件）
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          lfs: true # 如果模型文件使用LFS，这个选项很重要
+          lfs: true
 
-      # 第2步：设置 Python 3.10 环境，并启用缓存加速后续构建
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
           cache: 'pip'
 
-      # 第3步：安装所有 Python 依赖
-      - name: Install Dependencies
+      - name: Install Dependencies from requirements.txt
+        # 【核心修复】我们只信任 requirements.txt，不画蛇添足
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # 第4步：【核心】使用我们全新的、最终的配置文件进行打包
-      - name: Build EXE with Final Spec
-        run: pyinstaller --noconfirm x-anylabeling-win-cpu.spec
+      - name: Build EXE with Your Spec File
+        # 【核心修复】请将下面的 your-spec-file.spec 换成您在第二步中修改的那个文件名
+        run: pyinstaller --noconfirm your-spec-file.spec
 
-      # 第5步：将 models 文件夹复制到打包好的程序旁边
-      # 注意：目标文件夹名称 'X-AnyLabeling-Patched' 与 .spec 文件中定义的名字一致
       - name: Copy Models Folder
-        run: Copy-Item -Path models -Destination dist/X-AnyLabeling-Patched -Recurse -Force
+        run: Copy-Item -Path models -Destination dist/X-AnyLabeling-Fixed -Recurse -Force
 
-      # 第6步：将最终产物压缩成一个 .zip 文件
       - name: Package to Zip
         run: |
-          Compress-Archive -Path dist/X-AnyLabeling-Patched/* -DestinationPath X-AnyLabeling-Win-Patched-v${{ github.run_number }}.zip
-          echo "ZIP_NAME=X-AnyLabeling-Win-Patched-v${{ github.run_number }}.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Compress-Archive -Path dist/X-AnyLabeling-Fixed/* -DestinationPath X-AnyLabeling-Win-Fixed-v${{ github.run_number }}.zip
+          echo "ZIP_NAME=X-AnyLabeling-Win-Fixed-v${{ github.run_number }}.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      # 第7步：创建 GitHub Release 并上传 .zip 文件
       - name: Upload and Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}-patched
-          name: "Windows Patched Build #${{ github.run_number }}"
-          body: "这是一个修复版构建，已解决模型加载、路径和隐藏依赖问题。"
+          tag_name: v${{ github.run_number }}-fixed
+          name: "Windows Fixed Build #${{ github.run_number }}"
+          body: "此版本已修复模型加载的路径问题。"
           files: ${{ env.ZIP_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
