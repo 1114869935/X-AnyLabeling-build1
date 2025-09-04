@@ -1,9 +1,6 @@
-# -*- mode: python -*-
-# vim: ft=python
-
 import sys
 
-sys.setrecursionlimit(5000)  # required on Windows
+sys.setrecursionlimit(5000)
 
 a = Analysis(
     ['anylabeling/app.py'],
@@ -18,9 +15,17 @@ a = Analysis(
         ('anylabeling/services/auto_labeling/configs/ppocr/*', 'anylabeling/services/auto_labeling/configs/ppocr'),
         ('anylabeling/services/auto_labeling/configs/ram/*', 'anylabeling/services/auto_labeling/configs/ram')
     ],
-    hiddenimports=[],
+    # 【核心修复】强制包含 onnxruntime 和其他库可能遗漏的隐藏依赖
+    hiddenimports=[
+        'onnxruntime.capi._pybind_state',
+        'scipy.special._cdflib',
+        'scipy._lib.messagestream',
+        'sklearn.utils._cython_blas',
+        'skimage.io._plugins',
+        'pkg_resources.extern'
+    ],
     hookspath=[],
-    runtime_hooks=['runtime_hook.py'],  # <---【修改一】在这里加上了钩子文件
+    runtime_hooks=['runtime_hook.py'],  # 永久修复路径问题
     excludes=[],
 )
 pyz = PYZ(a.pure, a.zipped_data)
@@ -30,16 +35,16 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='X-AnyLabeling-CPU-Debug',  # 我加了-Debug后缀，方便你识别
+    name='X-AnyLabeling-CPU-Patched',  # 新名字，表示已修复
     debug=False,
     strip=False,
     upx=False,
     runtime_tmpdir=None,
-    console=True,  # <---【修改二】这里改成了 True，强制显示调试窗口
-    icon='anylabeling/resources/images/icon.ico', # 建议Windows用.ico图标，但不是强制
+    console=True,  # 保留诊断能力，这是程序的“黑匣子”
+    icon='anylabeling/resources/images/icon.ico',
 )
 
-# 下面这部分在Windows构建时会被自动忽略，保留也没关系
+# macOS 部分在 Windows 构建时会被忽略
 app = BUNDLE(
     exe,
     name='X-AnyLabeling.app',
