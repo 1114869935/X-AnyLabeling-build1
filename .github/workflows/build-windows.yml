@@ -6,12 +6,16 @@ on:
     branches:
       - main
 
+# 1. 【修复】为整个工作流授予创建 Release 所需的写入权限
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      # 1) 拉代码 + LFS（模型）
+      # 1) 拉取代码 + LFS（模型）
       - name: Checkout (with LFS)
         uses: actions/checkout@v4
         with:
@@ -44,6 +48,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          # 2. 【优化】增加 pip 缓存，加速后续构建
+          cache: 'pip'
 
       # 4) 依赖安装（健壮）
       - name: Install dependencies (robust)
@@ -63,7 +69,7 @@ jobs:
           # 常用依赖（按项目实际可删改）
           pip install PyQt5 shapely numpy pillow onnxruntime opencv-python scikit-image pyqtgraph tqdm requests
 
-      # 5) 构建：优先用 .spec；没有就兜底用入口脚本，并把 models 打进包
+      # 5) 构建：优先用 .spec；没有就兜底用入口脚本
       - name: Build (prefer .spec; fallback to entry script)
         shell: pwsh
         run: |
@@ -97,7 +103,7 @@ jobs:
         shell: pwsh
         run: Get-ChildItem -Recurse dist | Select-Object FullName,Length
 
-      # 7) 双保险：把 models 放到生成的 .exe 同级目录（兼容 onedir/onefile）
+      # 7) 双保险：把 models 放到生成的 .exe 同级目录
       - name: Ensure models copied next to the EXE (robust)
         shell: pwsh
         run: |
@@ -122,25 +128,30 @@ jobs:
       - name: Package zip
         shell: pwsh
         run: |
-          if (Test-Path X-AnyLabeling-win.zip) { Remove-Item X-AnyLabeling-win.zip -Force }
-          Compress-Archive -Path dist\* -DestinationPath X-AnyLabeling-win.zip
-          Write-Host "Zip created: X-AnyLabeling-win.zip"
+          # 3. 【优化】压缩包带上版本号，方便识别
+          $zipName = "X-AnyLabeling-win-v${{ github.run_number }}.zip"
+          if (Test-Path $zipName) { Remove-Item $zipName -Force }
+          Compress-Archive -Path dist\* -DestinationPath $zipName
+          Write-Host "Zip created: $zipName"
+          # 将 zip 名称写入环境变量，供后续步骤使用
+          echo "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # 10) 备份到 Artifact（页面可下载）
       - name: Upload artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: X-AnyLabeling-win
-          path: X-AnyLabeling-win.zip
+          name: X-AnyLabeling-win-v${{ github.run_number }}
+          path: ${{ env.ZIP_NAME }}
 
-      # 11) 自动发 Release（生成下载链接）
+      # 11) 自动发 Release
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        # 4. 【优化】更新到最新的 v2 版本
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: "Windows Build #${{ github.run_number }}"
           body: |
             自动生成的 Windows 包（含 models/）。若运行异常，请检查 dist 目录结构及模型路径。
-          files: X-AnyLabeling-win.zip
+          files: ${{ env.ZIP_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
