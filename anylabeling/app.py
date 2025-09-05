@@ -37,6 +37,8 @@ from anylabeling.resources import resources
 
 
 def main():
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--reset-config", action="store_true", help="reset qt config"
