@@ -1246,15 +1246,6 @@ class Canvas(
         p.translate(self.offset_to_center())
 
         p.drawPixmap(0, 0, self.pixmap)
-        dpr = 1.0
-        try:
-            dpr = float(self.pixmap.devicePixelRatio())
-        except Exception:
-            dpr = 1.0
-        
-        p.save()
-        if dpr != 1.0:
-            p.scale(1.0 / dpr, 1.0 / dpr)
         Shape.scale = self.scale
 
         # Draw loading/waiting screen
@@ -1806,18 +1797,11 @@ class Canvas(
             # 使用 QPolygonF 进行绘制，这是绘制点集的标准方式
             poly = QtGui.QPolygonF(self.split_line_points)
             p.drawPolyline(poly)
-        p.restore()
         p.end()
 
     def transform_pos(self, point):
-        """Convert from widget coords to IMAGE-PIXEL coords, DPI-safe."""
-        base = point / self.scale - self.offset_to_center()
-        dpr = 1.0
-        try:
-            dpr = float(self.pixmap.devicePixelRatio()) if self.pixmap is not None else 1.0
-        except Exception:
-            dpr = 1.0
-        return base * dpr
+        """Convert from widget-logical coordinates to painter-logical ones."""
+        return point / self.scale - self.offset_to_center()
 
     def offset_to_center(self):
         """Calculate offset to the center"""
