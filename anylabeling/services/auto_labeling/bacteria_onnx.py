@@ -1,5 +1,6 @@
-# 文件路径: anylabeling/services/auto_labeling/bacteria_onnx.py
-# 【最终修正版 - 适用于PyInstaller打包 | CPU-only + 早期过滤 + 解码批处理 + 复杂度优化】
+# 【最终修复版 - 整合优化与正确缩放逻辑】
+# 该版本基于您的优化版代码（代码1），并修复了其中导致掩码错位的关键bug。
+# 修复方法：采用了代码2中正确的、分步的掩码上采样逻辑，即“先放大到模型输入空间，再裁剪padding，最后缩放到原图尺寸”。
 
 import cv2
 import numpy as np
@@ -21,7 +22,6 @@ class BacteriaONNX:
     making it compatible with PyInstaller-packaged applications.
     """
 
-    # ==================== 修改后的 __init__ 方法 ====================
     def __init__(self, encoder_path: str, decoder_path: str, input_size: int = 1024):
         """
         Initializes the BacteriaONNX model loader.
@@ -54,7 +54,6 @@ class BacteriaONNX:
             so.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
             try:
                 cpu_cnt = os.cpu_count() or 4
-                # 经验值：避免开过多线程导致上下文切换开销
                 so.intra_op_num_threads = min(4, cpu_cnt)
                 so.inter_op_num_threads = 1
                 so.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
@@ -69,7 +68,6 @@ class BacteriaONNX:
             self.enc_input_name = self.enc_session.get_inputs()[0].name
             logging.info(f"ONNX models loaded successfully, using providers: {self.enc_session.get_providers()}")
 
-            # 记录 decoder 输入名（避免硬编码），并预创建可复用模板
             self.dec_input_names = [i.name for i in self.dec_session.get_inputs()]
             self._mask_input_template = np.zeros((1, 1, 256, 256), dtype=np.float32)
             self._has_mask_input_template = np.array([0.0], dtype=np.float32)
@@ -77,7 +75,6 @@ class BacteriaONNX:
         except Exception as e:
             logging.error(f"Failed to load ONNX models. Error: {e}", exc_info=True)
             raise e
-    # ==================== __init__ 方法修改结束 ====================
 
     def predict_masks(self, cv_image: np.ndarray) -> np.ndarray:
         """
@@ -92,16 +89,13 @@ class BacteriaONNX:
             enc_input_3d = (padded_img.astype(np.float32) / 255.0)
             enc_input = np.expand_dims(enc_input_3d, axis=0).transpose(0, 3, 1, 2).copy()
 
-            # Encoder 前向
             image_embeddings = self.enc_session.run(None, {self.enc_input_name: enc_input})[0]
 
-            # ---- ROI：培养皿检测（一次）+ 早期兴趣区域过滤 ----
             gray_image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
             roi_mask = self._find_petri_dish(gray_image)
             interest_mask = self._compute_interest_mask(gray_image, min_window=9, var_thresh_percentile=60.0)
             roi_interest = cv2.bitwise_and(roi_mask, interest_mask)
 
-            # ---- 网格点向量化筛选 ----
             grid_points = self._generate_grid_points(W, H, self.points_per_side)
             pts_x = grid_points[:, 0]
             pts_y = grid_points[:, 1]
@@ -111,15 +105,13 @@ class BacteriaONNX:
             if points_inside_roi.size == 0:
                 return np.array([])
 
-            # 可选：上限控制，避免极端情况下点过多压垮 CPU
             MAX_POINTS = 3000
             if len(points_inside_roi) > MAX_POINTS:
                 idx = np.linspace(0, len(points_inside_roi) - 1, MAX_POINTS, dtype=np.int32)
                 points_inside_roi = points_inside_roi[idx]
 
             all_masks_data = []
-
-            # ---- 解码批处理：减少 session.run 次数（如模型不支持，则回退单点） ----
+            
             BATCH = 128
             try:
                 for start in range(0, len(points_inside_roi), BATCH):
@@ -130,8 +122,8 @@ class BacteriaONNX:
                     point_coords = np.stack([
                         np.stack([tx, ty], axis=1),
                         np.zeros_like(batch_pts, dtype=np.float32)
-                    ], axis=1)  # (B,2,2)
-                    point_labels = np.stack([np.array([1.0, -1.0], dtype=np.float32)] * len(batch_pts), axis=0)  # (B,2)
+                    ], axis=1)
+                    point_labels = np.stack([np.array([1.0, -1.0], dtype=np.float32)] * len(batch_pts), axis=0)
                     mask_input = np.repeat(self._mask_input_template, repeats=len(batch_pts), axis=0)
                     has_mask_input = np.repeat(self._has_mask_input_template, repeats=len(batch_pts), axis=0)
                     orig_im_size = np.repeat(np.array([[H, W]], dtype=np.float32), repeats=len(batch_pts), axis=0)
@@ -147,27 +139,34 @@ class BacteriaONNX:
 
                     masks, ious, low_res_logits = self.dec_session.run(None, feeds)
 
-                    # 合并插值：256 -> (new_w,new_h) -> (W,H)；轻量 3x3 平滑
                     C = low_res_logits.shape[1]
                     for b in range(low_res_logits.shape[0]):
                         for i in range(C):
                             iou = float(ious[b, i])
                             if iou < self.pred_iou_thresh:
                                 continue
+                            
                             logits_256 = low_res_logits[b, i]
                             prob_256 = _sigmoid(np.nan_to_num(np.clip(logits_256, -100, 100)))
-                            prob_nopad = cv2.resize(prob_256, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                            prob_full = cv2.resize(prob_nopad, (W, H), interpolation=cv2.INTER_LINEAR)
+
+                            # ==================== BUG FIX START ====================
+                            # 使用正确的、分步的缩放逻辑来避免几何畸变
+                            # 1. 将256x256的掩码上采样到完整的模型输入空间 (1024x1024)
+                            prob_1024 = cv2.resize(prob_256, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
+                            # 2. 从1024x1024的空间中，裁剪掉填充(padding)部分，只保留有效图像区域
+                            prob_padded = prob_1024[:new_h, :new_w]
+                            # 3. 将已正确裁剪的掩码缩放回原始图像尺寸
+                            prob_full = cv2.resize(prob_padded, (W, H), interpolation=cv2.INTER_LINEAR)
+                            # ===================== BUG FIX END =====================
+
                             prob_full = cv2.GaussianBlur(prob_full, (3, 3), 0)
                             final_mask = (prob_full >= self.mask_threshold)
 
-                            # —— 立即面积过滤（你提出的改动）：太小的不加入 ——
                             if np.count_nonzero(final_mask) <= self.min_mask_region_area:
                                 continue
 
                             all_masks_data.append({"mask": final_mask, "iou": iou})
             except Exception:
-                # 批处理不支持时回退逐点
                 for point in points_inside_roi:
                     results_for_point = self._process_single_point(point, image_embeddings, scale, H, W, new_h, new_w)
                     if results_for_point:
@@ -176,15 +175,12 @@ class BacteriaONNX:
             if not all_masks_data:
                 return np.array([])
 
-            # 基础后处理（小区域过滤 + NMS）
             base_filtered = self._base_postprocess(all_masks_data, self.min_mask_region_area, self.box_nms_thresh)
             if not base_filtered:
                 return np.array([])
 
-            # 几何约束过滤（面积占比 + 圆度）
             advanced_filtered = self._advanced_postprocess(base_filtered, (H, W), self.max_area_ratio, self.min_circularity)
 
-            # ROI 裁剪
             final_masks_list = []
             roi_mask_bool = roi_mask.astype(bool, copy=False)
             for data in advanced_filtered:
@@ -238,14 +234,16 @@ class BacteriaONNX:
                 logits_256 = low_res_logits[0, i]
                 prob_256 = _sigmoid(np.nan_to_num(np.clip(logits_256, -100, 100)))
 
-                # 合并插值路径
-                prob_nopad = cv2.resize(prob_256, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                prob_full = cv2.resize(prob_nopad, (W, H), interpolation=cv2.INTER_LINEAR)
+                # ==================== BUG FIX START ====================
+                # 使用与批处理中完全相同的正确缩放逻辑
+                prob_1024 = cv2.resize(prob_256, (self.input_size, self.input_size), interpolation=cv2.INTER_LINEAR)
+                prob_padded = prob_1024[:new_h, :new_w]
+                prob_full = cv2.resize(prob_padded, (W, H), interpolation=cv2.INTER_LINEAR)
+                # ===================== BUG FIX END =====================
+                
                 prob_full = cv2.GaussianBlur(prob_full, (3, 3), 0)
-
                 final_mask = (prob_full >= self.mask_threshold)
 
-                # —— 立即面积过滤：太小直接丢弃 ——
                 if np.count_nonzero(final_mask) <= self.min_mask_region_area:
                     continue
 
@@ -258,7 +256,6 @@ class BacteriaONNX:
         Finds the petri dish in the image to create a region of interest (ROI).
         """
         h, w = gray_image.shape
-        # 更轻的预模糊，降低 Hough 前成本
         blurred = cv2.GaussianBlur(gray_image, (5, 5), 1.5)
         circles = cv2.HoughCircles(
             blurred, cv2.HOUGH_GRADIENT,
@@ -277,7 +274,7 @@ class BacteriaONNX:
 
     def _compute_interest_mask(self, gray: np.ndarray, min_window: int = 9, var_thresh_percentile: float = 60.0) -> np.ndarray:
         """
-        计算兴趣区域掩码：用 Laplacian 方差近似局部纹理强度，阈值采用分位数，返回与 gray 同尺寸的 uint8 {0,255} 掩码。
+        Computes an interest mask based on local variance.
         """
         H, W = gray.shape
         target = 512
@@ -290,10 +287,8 @@ class BacteriaONNX:
 
         gray_small = cv2.GaussianBlur(gray_small, (3, 3), 0)
 
-        # Laplacian 响应
         lap = cv2.Laplacian(gray_small, ddepth=cv2.CV_32F, ksize=3)
-
-        # 局部均值与方差的快速近似（盒滤）
+        
         k = max(3, min_window | 1)
         mean = cv2.boxFilter(lap, ddepth=-1, ksize=(k, k), normalize=True)
         mean_sq = mean * mean
