@@ -59,6 +59,7 @@ class Canvas(
     _fill_drawing = False
 
     def __init__(self, *args, **kwargs):
+        
         self.epsilon = kwargs.pop("epsilon", 10.0)
         self.double_click = kwargs.pop("double_click", "close")
         if self.double_click not in [None, "close"]:
@@ -80,6 +81,7 @@ class Canvas(
         )
         self.parent = kwargs.pop("parent")
         super().__init__(*args, **kwargs)
+        print(f"\n[DEBUG] Canvas Initialized! Device Pixel Ratio: {self.devicePixelRatioF()}")
         # Initialise local state.
         self.mode = self.EDIT
         self.is_auto_labeling = False
@@ -175,6 +177,34 @@ class Canvas(
                 False, mode.shape_type, disable_auto_labeling=False
             )
 
+    def _debug_mouse_event(self, ev, event_name=""):
+        """一个专门用于打印调试信息的函数"""
+        print(f"\n---------- [DEBUG] {event_name} ----------")
+        
+        # 1. 打印 DPI 和缩放信息
+        print(f"[DEBUG] DPI Ratio         : {self.devicePixelRatioF()}")
+        print(f"[DEBUG] Canvas Scale      : {self.scale}")
+        
+        # 2. 打印鼠标事件提供的各种坐标
+        print(f"[DEBUG] MouseEvent pos()      : {ev.pos()}")
+        print(f"[DEBUG] MouseEvent localPos(): {ev.localPos()}")
+        print(f"[DEBUG] MouseEvent windowPos(): {ev.windowPos()}")
+        print(f"[DEBUG] MouseEvent screenPos(): {ev.screenPos()}")
+
+        # 3. 打印用于坐标转换的关键画布状态
+        pixmap_size = self.pixmap.size() if self.pixmap else "None"
+        offset = self.offset_to_center()
+        print(f"[DEBUG] Pixmap Size       : {pixmap_size}")
+        print(f"[DEBUG] Canvas Offset     : ({offset.x():.2f}, {offset.y():.2f})")
+        
+        # 4. 计算并打印最终转换后的坐标
+        try:
+            transformed_pos = self.transform_pos(ev.localPos())
+            print(f"[DEBUG] ==> FINAL COORDS <==: ({transformed_pos.x():.2f}, {transformed_pos.y():.2f})")
+        except Exception as e:
+            print(f"[DEBUG] ==> FINAL COORDS <==: FAILED to transform! Error: {e}")
+        
+        print("------------------------------------------\n")
     def set_auto_decode_mode(self, enabled: bool):
         """Set auto decode mode"""
         if self.auto_decode_mode and not enabled:
@@ -707,6 +737,7 @@ class Canvas(
     # QT Overload
     def mousePressEvent(self, ev):  # noqa: C901
         """Mouse press event"""
+        self._debug_mouse_event(ev, "Mouse Press")
         if self.is_loading:
             return
         pos = self.transform_pos(ev.localPos())
